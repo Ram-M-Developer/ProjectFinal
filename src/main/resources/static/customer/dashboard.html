@@ -60,7 +60,7 @@
     <section class="booking-col booking-col-seats">
       <div class="booking-col-header">
         <h5>SEATS</h5>
-        <span class="badge bg-light text-dark border">2 Service Seats</span>
+        <span class="badge bg-light text-dark border">2 Main • 4 Waiting</span>
       </div>
       <div class="booking-col-body" id="seats-container">
         <!-- Dynamically rendered by renderSeats() -->
@@ -178,7 +178,7 @@
             <!-- Price Total -->
             <div class="d-flex justify-content-between align-items-center p-2.5 rounded mb-3 bg-light border">
               <span class="text-muted small">Estimated Price:</span>
-              <strong class="text-primary fs-5" id="slot-modal-price">&#8377;25.00</strong>
+              <strong class="text-primary fs-5" id="slot-modal-price">&#8377;120.00</strong>
             </div>
 
             <div class="alert alert-info py-2 px-3 small d-flex align-items-center gap-2 mb-3" style="font-size:0.78rem;">
@@ -210,11 +210,16 @@
             <p class="text-muted mb-0">Customers are assigned in strict first-come, first-served order as soon as a seat service is completed.</p>
           </div>
 
+          <div id="queue-slot-indicator" style="display:none;"></div>
+
           <form onsubmit="handleJoinQueueSubmit(event)">
             <div class="mb-3">
               <label for="queue-service-select" class="form-label fw-bold small text-muted">Select Service <span class="text-danger">*</span></label>
               <select class="form-select" id="queue-service-select" required>
-                <!-- Populated by JS -->
+                <option value="1">Haircut — ₹120.00 (30m)</option>
+                <option value="2">Shaving — ₹80.00 (20m)</option>
+                <option value="3">Both (Haircut &amp; Shaving) — ₹200.00 (45m)</option>
+                <option value="4">Facial — ₹300.00 (30m)</option>
               </select>
             </div>
 

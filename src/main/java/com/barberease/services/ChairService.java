@@ -45,12 +45,21 @@ public class ChairService {
         List<Chair> chairs = chairRepository.findAll();
         boolean changed = false;
         for (Chair chair : chairs) {
-            if ("occupied".equals(chair.getStatus())) {
+            boolean isWaitingChair = "waiting".equalsIgnoreCase(chair.getChairType()) || chair.getChairNumber() >= 3;
+            if ("occupied".equals(chair.getStatus()) || "waiting".equals(chair.getStatus())) {
+                java.time.LocalDate today = java.time.LocalDate.now();
+                List<String> allowedApptStatuses = isWaitingChair 
+                        ? Arrays.asList("in_progress", "confirmed", "waiting") 
+                        : Arrays.asList("in_progress", "confirmed");
+                List<String> allowedQueueStatuses = isWaitingChair 
+                        ? Arrays.asList("serving", "called", "waiting") 
+                        : Arrays.asList("serving", "called");
+
                 boolean hasActiveAppt = appointmentRepository.findByChairId(chair.getId()).stream()
-                        .anyMatch(a -> "in_progress".equals(a.getStatus()));
+                        .anyMatch(a -> today.equals(a.getAppointmentDate()) && allowedApptStatuses.contains(a.getStatus()));
                 boolean hasActiveQueue = queueRepository.findByChairIdAndStatusInOrderByPositionAsc(
-                        chair.getId(), Arrays.asList("serving", "called")).stream()
-                        .findAny().isPresent();
+                        chair.getId(), allowedQueueStatuses).stream()
+                        .anyMatch(q -> q.getCreatedAt() != null && q.getCreatedAt().toLocalDate().equals(today));
 
                 if (!hasActiveAppt && !hasActiveQueue) {
                     chair.setStatus("available");

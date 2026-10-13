@@ -628,6 +628,26 @@
     }
 
     // ── WebSocket ──
+    let queueDebounceTimer = null;
+    let queuePollTimer = null;
+
+    function scheduleQueueLoad(delay = 300) {
+      if (queueDebounceTimer) clearTimeout(queueDebounceTimer);
+      queueDebounceTimer = setTimeout(loadQueue, delay);
+    }
+
+    function startQueuePolling() {
+      if (queuePollTimer) return;
+      queuePollTimer = setInterval(loadQueue, 10000);
+    }
+
+    function stopQueuePolling() {
+      if (queuePollTimer) {
+        clearInterval(queuePollTimer);
+        queuePollTimer = null;
+      }
+    }
+
     function setupQueueWS() {
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -635,23 +655,26 @@
         ws.onopen = () => {
           document.getElementById('queue-ws-dot').classList.add('connected');
           document.getElementById('queue-ws-label').textContent = 'Live';
+          stopQueuePolling();
         };
         ws.onmessage = (e) => {
           const d = JSON.parse(e.data);
-          if (d.event === 'queue-update' || d.event === 'chair-update' || d.event === 'appointment-update') loadQueue();
+          if (['queue-update', 'chair-update', 'appointment-update'].includes(d.event)) {
+            scheduleQueueLoad(300);
+          }
         };
         ws.onclose = () => {
           document.getElementById('queue-ws-dot').classList.remove('connected');
           document.getElementById('queue-ws-label').textContent = 'Polling';
-          setInterval(loadQueue, 8000);
+          startQueuePolling();
         };
-      } catch (e) { setInterval(loadQueue, 8000); }
+      } catch (e) { startQueuePolling(); }
     }
 
     loadServices();
     loadQueue();
     setupQueueWS();
-    setInterval(loadQueue, 15000);
+    setInterval(loadQueue, 30000);
   </script>
 </body>
 </html>

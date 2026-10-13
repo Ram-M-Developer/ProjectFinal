@@ -21,6 +21,10 @@ public class Chair {
     @Column(nullable = false, length = 20)
     private String status = "available";
 
+    @JsonProperty("chair_type")
+    @Column(name = "chair_type", length = 20)
+    private String chairType = "main"; // "main" or "waiting"
+
     @JsonProperty("is_active")
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;
@@ -120,5 +124,13 @@ public class Chair {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getChairType() {
+        return chairType != null ? chairType : "main";
+    }
+
+    public void setChairType(String chairType) {
+        this.chairType = chairType;
     }
 }

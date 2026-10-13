@@ -11,6 +11,8 @@ import java.util.List;
 public interface ChairRepository extends JpaRepository<Chair, Long> {
     List<Chair> findByIsActiveTrueOrderByChairNumberAsc();
     List<Chair> findByStatusAndIsActiveTrueOrderByChairNumberAsc(String status);
+    List<Chair> findByChairTypeAndIsActiveTrueOrderByChairNumberAsc(String chairType);
+    List<Chair> findByChairTypeAndStatusAndIsActiveTrueOrderByChairNumberAsc(String chairType, String status);
     List<Chair> findByStatusAndReservedAtBefore(String status, LocalDateTime cutoff);
     java.util.Optional<Chair> findByChairNumber(int chairNumber);
 }

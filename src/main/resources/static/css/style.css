@@ -2009,7 +2009,8 @@ html, body {
 .booking-col-body {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   padding: 0.85rem;
 }
 
@@ -2044,6 +2045,43 @@ html, body {
 .seat-card-compact.waiting {
   border-color: #f59e0b;
   background: #fffbeb;
+}
+
+/* Seat Section Headings */
+.seat-section-heading {
+  font-size: 0.78rem;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  margin-bottom: 0.4rem;
+}
+
+/* 4 Waiting Chairs Grid */
+.waiting-chairs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.waiting-chair-card {
+  border: 1.5px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.6rem 0.65rem;
+  background: #ffffff;
+  transition: all 0.2s ease;
+}
+.waiting-chair-card.available {
+  border-color: #10b981;
+  background: #f0fdf4;
+}
+.waiting-chair-card.waiting,
+.waiting-chair-card.occupied {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.waiting-chair-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
 }
 
 .seat-title-row {

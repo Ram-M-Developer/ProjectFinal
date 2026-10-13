@@ -49,11 +49,14 @@ public class QueueService {
     private AppointmentService appointmentService;
 
     public Queue addToQueue(Long customerId, Long serviceId) {
-        return addToQueue(customerId, serviceId, null);
+        return addToQueue(customerId, serviceId, null, null, null);
     }
 
-    public Queue addToQueue(Long customerId, Long serviceId, Long ignoredChairId) {
-        // chairId is ignored — queue is global/token-based; chair assigned when called
+    public Queue addToQueue(Long customerId, Long serviceId, Long chairId) {
+        return addToQueue(customerId, serviceId, chairId, null, null);
+    }
+
+    public Queue addToQueue(Long customerId, Long serviceId, Long chairId, String timeSlot, String appointmentDateStr) {
         com.barberease.models.Service service = serviceRepository.findById(serviceId)
                 .orElseThrow(() -> new IllegalArgumentException("Service not found or inactive"));
 
@@ -64,6 +67,13 @@ public class QueueService {
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new IllegalArgumentException("Customer not found"));
 
+        LocalDate targetDate = LocalDate.now();
+        if (appointmentDateStr != null && !appointmentDateStr.trim().isEmpty()) {
+            try {
+                targetDate = LocalDate.parse(appointmentDateStr.trim());
+            } catch (Exception ignored) {}
+        }
+
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
         Optional<Queue> existing = queueRepository.findByCustomerIdAndStatusIn(
                 customerId, Arrays.asList("waiting", "called"));
@@ -71,47 +81,103 @@ public class QueueService {
         if (existing.isPresent()) {
             Queue existingEntry = existing.get();
             if (existingEntry.getCreatedAt() != null && existingEntry.getCreatedAt().isAfter(startOfDay)) {
-                throw new IllegalStateException("You are already in today's waiting queue");
+                throw new IllegalStateException("You are already in today's waiting list (Token: " + existingEntry.getTokenNumber() + ")");
             } else {
-                // Stale entry from a previous day: auto-complete it
                 existingEntry.setStatus("completed");
                 existingEntry.setCompletedAt(LocalDateTime.now());
                 queueRepository.save(existingEntry);
             }
         }
 
-        // Global position (no chair assignment at join time)
-        Optional<Queue> last = queueRepository.findFirstByStatusInOrderByPositionDesc(
-                Arrays.asList("waiting", "called"));
-        int position = last.map(q -> q.getPosition() + 1).orElse(1);
+        // Clean up any stale serving entries that are not actively in service
+        Optional<Queue> servingQueue = queueRepository.findByCustomerIdAndStatusIn(
+                customerId, Collections.singletonList("serving"));
+        if (servingQueue.isPresent()) {
+            Queue sq = servingQueue.get();
+            if (sq.getChair() == null || sq.getChair().getReservedByCustomer() == null ||
+                    !sq.getChair().getReservedByCustomer().getId().equals(customerId)) {
+                sq.setStatus("completed");
+                sq.setCompletedAt(LocalDateTime.now());
+                queueRepository.save(sq);
+            }
+        }
 
-        // Token format: Q-001, Q-002, …
-        String tokenNumber = "Q-" + String.format("%03d", position);
+        long countTotal = queueRepository.count();
+        long tokenIndex = countTotal + 1;
+        String tokenNumber = "Q-" + String.format("%03d", tokenIndex);
 
         int avgDuration = service.getDurationMinutes() > 0 ? service.getDurationMinutes() : 30;
-        int estimatedWait = Math.max(0, (position - 1) * avgDuration);
+
+        Chair assignedChair = null;
+        if (chairId != null) {
+            assignedChair = chairRepository.findById(chairId).orElse(null);
+        } else {
+            // Automatically allocate first free waiting chair (Chairs 3, 4, 5, 6)
+            List<Chair> waitChairs = chairRepository.findByChairTypeAndIsActiveTrueOrderByChairNumberAsc("waiting");
+            for (Chair wc : waitChairs) {
+                if (wc.getChairNumber() >= 3 && wc.getChairNumber() <= 6) {
+                    if ("available".equalsIgnoreCase(wc.getStatus()) || wc.getReservedByCustomer() == null) {
+                        assignedChair = wc;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (assignedChair != null && targetDate.equals(LocalDate.now())) {
+            assignedChair.setStatus("waiting");
+            assignedChair.setReservedByCustomer(customer);
+            assignedChair.setReservedAt(LocalDateTime.now());
+            chairRepository.save(assignedChair);
+        }
+
+        // When joining the waiting list or queue, status is ALWAYS "waiting"!
+        String queueStatus = "waiting";
+
+        int position = assignedChair != null 
+                ? (assignedChair.getChairNumber() <= 2 ? 0 : assignedChair.getChairNumber() - 2)
+                : (int) queueRepository.countByStatusAndChairIsNull("waiting") + 1;
+        int estimatedWait = Math.max(0, position * avgDuration);
 
         Queue queue = new Queue();
         queue.setCustomer(customer);
         queue.setService(service);
-        queue.setChair(null); // chair assigned later when called
+        queue.setChair(assignedChair);
         queue.setTokenNumber(tokenNumber);
         queue.setPosition(position);
-        queue.setStatus("waiting");
+        queue.setStatus(queueStatus);
         queue.setEstimatedWaitMinutes(estimatedWait);
         Queue saved = queueRepository.save(queue);
 
-        // Create token
+        // Create waiting appointment record
+        Appointment queueAppt = new Appointment();
+        queueAppt.setCustomer(customer);
+        queueAppt.setService(service);
+        queueAppt.setChair(assignedChair);
+        queueAppt.setTokenNumber(tokenNumber);
+        queueAppt.setAppointmentDate(targetDate);
+        queueAppt.setTimeSlot(timeSlot != null && !timeSlot.trim().isEmpty() ? timeSlot : "Next Available");
+        queueAppt.setStatus(assignedChair != null ? "confirmed" : "pending");
+        int waitNum = assignedChair != null ? Math.max(1, assignedChair.getChairNumber() - 2) : 1;
+        queueAppt.setNotes(assignedChair != null ? "(Waiting Chair " + waitNum + ")" : "(Queued: Waiting List #" + position + ")");
+        Appointment savedAppt = appointmentRepository.save(queueAppt);
+
         Token token = new Token();
         token.setTokenNumber(tokenNumber);
         token.setCustomer(customer);
         token.setQueue(saved);
+        token.setAppointment(savedAppt);
         token.setType("queue");
-        token.setTokenDate(LocalDate.now());
+        token.setTokenDate(targetDate);
         token.setStatus("active");
         tokenRepository.save(token);
 
+        recalculatePositions();
+
+        webSocketHandler.broadcast("chair-update");
         webSocketHandler.broadcast("queue-update");
+        webSocketHandler.broadcast("appointment-update");
+        webSocketHandler.broadcast("slot-update");
 
         return saved;
     }
@@ -138,8 +204,35 @@ public class QueueService {
     }
 
     public List<Queue> getWaitingQueue() {
+        return getWaitingQueue(null);
+    }
+
+    public List<Queue> getWaitingQueue(LocalDate date) {
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
-        return queueRepository.findByStatusAndCreatedAtAfterOrderByCreatedAtAsc("waiting", startOfDay);
+        List<Queue> allWaiting = queueRepository.findByStatusInAndCreatedAtAfterOrderByCreatedAtAsc(
+                Arrays.asList("waiting", "called"), startOfDay);
+
+        if (date == null || date.equals(LocalDate.now())) {
+            return allWaiting;
+        }
+
+        List<Queue> filtered = new ArrayList<>();
+        for (Queue q : allWaiting) {
+            if (q.getTokenNumber() != null) {
+                List<Appointment> appts = appointmentRepository.findByTokenNumber(q.getTokenNumber());
+                if (!appts.isEmpty()) {
+                    Appointment a = appts.get(0);
+                    if (date.equals(a.getAppointmentDate())) {
+                        filtered.add(q);
+                        continue;
+                    }
+                }
+            }
+            if (q.getCreatedAt() != null && q.getCreatedAt().toLocalDate().equals(date)) {
+                filtered.add(q);
+            }
+        }
+        return filtered.isEmpty() ? allWaiting : filtered;
     }
 
     public Queue getCustomerQueueStatus(Long customerId) {
@@ -344,9 +437,13 @@ public class QueueService {
         webSocketHandler.broadcast("queue-update");
         webSocketHandler.broadcast("appointment-update");
 
-        // Auto-call next waiting customer if chair is freed
+        // Auto-call next waiting customer or rotate pipeline if main chair is freed
         if (freedChair != null) {
-            callNextCustomer();
+            if (freedChair.getChairNumber() <= 2) {
+                appointmentService.rotateAndPromoteWaitingChairs(freedChair.getId(), LocalDate.now(), null);
+            } else {
+                callNextCustomer();
+            }
         }
 
         Map<String, Object> result = new HashMap<>();

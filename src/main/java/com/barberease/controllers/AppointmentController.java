@@ -11,6 +11,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,12 +88,37 @@ public class AppointmentController {
         return ResponseEntity.ok(body);
     }
 
+    private LocalDate parseSafeDate(String dateStr) {
+        if (dateStr == null) return LocalDate.now();
+        String trimmed = dateStr.trim();
+        if (trimmed.isEmpty() || "null".equalsIgnoreCase(trimmed) || "undefined".equalsIgnoreCase(trimmed)) {
+            return LocalDate.now();
+        }
+        try {
+            return LocalDate.parse(trimmed);
+        } catch (Exception e) {
+            try {
+                DateTimeFormatter[] formatters = new DateTimeFormatter[] {
+                    DateTimeFormatter.ofPattern("yyyy-M-d"),
+                    DateTimeFormatter.ofPattern("d-M-yyyy"),
+                    DateTimeFormatter.ofPattern("M/d/yyyy")
+                };
+                for (DateTimeFormatter fmt : formatters) {
+                    try {
+                        return LocalDate.parse(trimmed, fmt);
+                    } catch (Exception ignored) {}
+                }
+            } catch (Exception ignored) {}
+            return LocalDate.now();
+        }
+    }
+
     @GetMapping("/slots")
     public ResponseEntity<Map<String, Object>> getSlots(
             @RequestParam(name = "chairId", required = false) Long chairId,
             @RequestParam(name = "date", required = false) String dateStr) {
         
-        LocalDate date = (dateStr != null && !dateStr.isEmpty()) ? LocalDate.parse(dateStr) : LocalDate.now();
+        LocalDate date = parseSafeDate(dateStr);
         List<String> bookedSlots = appointmentService.getBookedSlots(chairId, date);
 
         Map<String, Object> data = new HashMap<>();
@@ -116,15 +143,22 @@ public class AppointmentController {
     @GetMapping("/slots/detailed")
     public ResponseEntity<Map<String, Object>> getDetailedSlots(
             @RequestParam(name = "date", required = false) String dateStr) {
-        LocalDate date = (dateStr != null && !dateStr.isEmpty()) ? LocalDate.parse(dateStr) : LocalDate.now();
-        Long customerId = getOptionalAuthenticatedCustomerId();
-        List<Map<String, Object>> slots = appointmentService.getDetailedSlots(date, customerId);
-
         Map<String, Object> body = new HashMap<>();
-        body.put("success", true);
-        body.put("date", date.toString());
-        body.put("data", slots);
-        return ResponseEntity.ok(body);
+        try {
+            LocalDate date = parseSafeDate(dateStr);
+            Long customerId = getOptionalAuthenticatedCustomerId();
+            List<Map<String, Object>> slots = appointmentService.getDetailedSlots(date, customerId);
+
+            body.put("success", true);
+            body.put("date", date.toString());
+            body.put("data", slots);
+            return ResponseEntity.ok(body);
+        } catch (Exception e) {
+            body.put("success", false);
+            body.put("message", "Database service error: " + e.getMessage());
+            body.put("data", Collections.emptyList());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+        }
     }
 
     @PostMapping("/book-slot")
@@ -135,7 +169,7 @@ public class AppointmentController {
 
         Object dateObj = request.get("appointment_date") != null ? request.get("appointment_date") : request.get("appointmentDate");
         String dateStr = dateObj != null ? dateObj.toString() : null;
-        LocalDate date = (dateStr != null && !dateStr.isEmpty()) ? LocalDate.parse(dateStr) : LocalDate.now();
+        LocalDate date = parseSafeDate(dateStr);
 
         Object slotObj = request.get("time_slot") != null ? request.get("time_slot") : request.get("timeSlot");
         String timeSlot = slotObj != null ? slotObj.toString() : null;
@@ -161,7 +195,7 @@ public class AppointmentController {
             @RequestParam(required = false) String status,
             @RequestParam(name = "customer_id", required = false) Long customerId) {
         
-        LocalDate localDate = date != null ? LocalDate.parse(date) : null;
+        LocalDate localDate = (date != null && !date.trim().isEmpty()) ? parseSafeDate(date) : null;
         List<Appointment> appts = appointmentService.getAllAppointments(localDate, status, customerId);
 
         Map<String, Object> body = new HashMap<>();

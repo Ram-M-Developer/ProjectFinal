@@ -29,6 +29,9 @@ public class ChairController {
     private com.barberease.repositories.AppointmentRepository appointmentRepository;
 
     @Autowired
+    private com.barberease.repositories.QueueRepository queueRepository;
+
+    @Autowired
     private BarberWebSocketHandler webSocketHandler;
 
     private Long getAuthenticatedCustomerId() {
@@ -40,57 +43,24 @@ public class ChairController {
     }
 
     @GetMapping
-    public ResponseEntity<Map<String, Object>> getAll() {
-        List<Chair> chairs = chairService.getAllChairs();
-        List<Map<String, Object>> enriched = new java.util.ArrayList<>();
-
-        for (Chair chair : chairs) {
-            Map<String, Object> map = new java.util.LinkedHashMap<>();
-            map.put("id", chair.getId());
-            map.put("chair_number", chair.getChairNumber());
-            map.put("name", "Seat " + chair.getChairNumber());
-            String customerName = "---";
-            String timeSlot = "---";
-            Long appointmentId = null;
-
-            List<com.barberease.models.Appointment> appts = appointmentRepository.findByChairId(chair.getId());
-            for (com.barberease.models.Appointment a : appts) {
-                if (("confirmed".equalsIgnoreCase(a.getStatus()) || "in_progress".equalsIgnoreCase(a.getStatus()))
-                        && a.getAppointmentDate() != null && a.getAppointmentDate().equals(java.time.LocalDate.now())) {
-                    if (a.getCustomer() != null) {
-                        customerName = a.getCustomer().getName();
-                    }
-                    if (a.getTimeSlot() != null) {
-                        timeSlot = a.getTimeSlot();
-                    }
-                    appointmentId = a.getId();
-                    break;
-                }
-            }
-
-            if ("---".equals(customerName) && chair.getReservedByCustomer() != null) {
-                customerName = chair.getReservedByCustomer().getName();
-                if (chair.getReservedAt() != null) {
-                    timeSlot = chair.getReservedAt().format(java.time.format.DateTimeFormatter.ofPattern("h:mm a"));
-                }
-            }
-
-            String status = chair.getStatus();
-            if (!"---".equals(customerName) && ("available".equalsIgnoreCase(status) || "reserved".equalsIgnoreCase(status))) {
-                status = "occupied";
-            }
-
-            map.put("status", status);
-            map.put("is_active", chair.isActive());
-            map.put("customer_name", customerName);
-            map.put("time", timeSlot);
-            map.put("appointment_id", appointmentId);
-            map.put("reserved_by_customer", chair.getReservedByCustomer());
-            enriched.add(map);
+    public ResponseEntity<Map<String, Object>> getAll(@RequestParam(required = false) String date) {
+        java.time.LocalDate queryDate = java.time.LocalDate.now();
+        if (date != null && !date.trim().isEmpty()) {
+            try {
+                queryDate = java.time.LocalDate.parse(date.trim());
+            } catch (Exception ignored) {}
         }
+
+        // Auto-promote waiting customers into available main seats when their slot is current/imminent.
+        // The promotion logic guards against future bookings (only promotes if slot ≤ now+20min).
+        if (queryDate.equals(java.time.LocalDate.now())) {
+            appointmentService.autoPromoteIfMainSeatsAvailable(queryDate);
+        }
+        List<Map<String, Object>> enriched = appointmentService.getEnrichedChairs(queryDate);
 
         Map<String, Object> body = new HashMap<>();
         body.put("success", true);
+        body.put("count", enriched.size());
         body.put("data", enriched);
         return ResponseEntity.ok(body);
     }
@@ -176,26 +146,44 @@ public class ChairController {
         return ResponseEntity.ok(body);
     }
 
-    private void verifyAdmin() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !(auth.getPrincipal() instanceof UserPrincipal)) {
-            throw new org.springframework.security.access.AccessDeniedException("Admin authentication required");
-        }
-        UserPrincipal principal = (UserPrincipal) auth.getPrincipal();
-        if (!"admin".equalsIgnoreCase(principal.getType()) && !"admin".equalsIgnoreCase(principal.getRole())) {
-            throw new org.springframework.security.access.AccessDeniedException("Access denied: Admin role required");
-        }
-    }
-
     @PostMapping("/{id}/complete-service")
-    public ResponseEntity<Map<String, Object>> completeService(@PathVariable Long id) {
-        verifyAdmin();
-        Chair chair = appointmentService.completeSeatService(id);
+    public ResponseEntity<Map<String, Object>> completeService(
+            @PathVariable Long id,
+            @RequestParam(name = "date", required = false) String dateStr) {
+        java.time.LocalDate date = (dateStr != null && !dateStr.trim().isEmpty()) ? java.time.LocalDate.parse(dateStr.trim()) : null;
+        Chair chair = appointmentService.completeSeatService(id, date);
 
         Map<String, Object> body = new HashMap<>();
         body.put("success", true);
-        body.put("message", "Seat service completed and next customer seated");
+        body.put("message", "Seat service completed and waiting pipeline rotated");
         body.put("data", chair);
+        return ResponseEntity.ok(body);
+    }
+
+    @PostMapping("/reorganize")
+    public ResponseEntity<Map<String, Object>> reorganize(
+            @RequestParam(name = "date", required = false) String dateStr,
+            @RequestParam(name = "slot", required = false) String slot) {
+        java.time.LocalDate date = (dateStr != null && !dateStr.trim().isEmpty()) ? java.time.LocalDate.parse(dateStr.trim()) : java.time.LocalDate.now();
+        appointmentService.rotateAndPromoteWaitingChairs(null, date, slot);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", true);
+        body.put("message", "Waiting chairs reorganized and rotated successfully");
+        return ResponseEntity.ok(body);
+    }
+
+    @PostMapping("/switch-waiting")
+    public ResponseEntity<Map<String, Object>> switchWaiting(
+            @RequestParam(name = "from", required = false, defaultValue = "2") Integer fromChair,
+            @RequestParam(name = "to", required = false, defaultValue = "1") Integer toChair,
+            @RequestParam(name = "date", required = false) String dateStr) {
+        java.time.LocalDate date = (dateStr != null && !dateStr.trim().isEmpty()) ? java.time.LocalDate.parse(dateStr.trim()) : java.time.LocalDate.now();
+        appointmentService.compactAndReorganizeWaitingChairs(date, fromChair, toChair);
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("success", true);
+        body.put("message", "Waiting seat " + fromChair + " switched to waiting seat " + toChair + " successfully");
         return ResponseEntity.ok(body);
     }
 }

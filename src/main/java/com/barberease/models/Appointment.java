@@ -30,7 +30,7 @@ public class Appointment {
     @Column(name = "appointment_date", nullable = false)
     private LocalDate appointmentDate;
 
-    @Column(name = "time_slot", nullable = false, length = 20)
+    @Column(name = "time_slot", nullable = false, length = 50)
     private String timeSlot;
 
     @Column(nullable = false, length = 20)

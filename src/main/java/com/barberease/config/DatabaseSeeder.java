@@ -57,61 +57,68 @@ public class DatabaseSeeder implements CommandLineRunner {
 
             services.add(createService("Haircut",
                     "Professional haircut and styling tailored to your preference.",
-                    30, new BigDecimal("25.00"), "haircut"));
+                    30, new BigDecimal("120.00"), "haircut"));
 
             services.add(createService("Shaving",
                     "Classic clean shave or beard trim with hot towel treatment.",
-                    20, new BigDecimal("15.00"), "shave"));
+                    20, new BigDecimal("80.00"), "shave"));
 
             services.add(createService("Both (Haircut & Shaving)",
                     "Complete grooming combo package including precision haircut and clean shave.",
-                    45, new BigDecimal("35.00"), "combo"));
+                    45, new BigDecimal("200.00"), "combo"));
 
             services.add(createService("Facial",
                     "Deep cleansing, exfoliating steam facial and rejuvenating treatment.",
-                    30, new BigDecimal("30.00"), "facial"));
+                    30, new BigDecimal("300.00"), "facial"));
 
             serviceRepository.saveAll(services);
             System.out.println("✂️ Grooming services seeded successfully (" + services.size() + " services created)");
+        } else {
+            List<Service> existing = serviceRepository.findAll();
+            for (Service s : existing) {
+                if ("Haircut".equalsIgnoreCase(s.getName())) {
+                    s.setPrice(new BigDecimal("120.00"));
+                } else if ("Shaving".equalsIgnoreCase(s.getName())) {
+                    s.setPrice(new BigDecimal("80.00"));
+                } else if ("Both (Haircut & Shaving)".equalsIgnoreCase(s.getName())) {
+                    s.setPrice(new BigDecimal("200.00"));
+                } else if ("Facial".equalsIgnoreCase(s.getName())) {
+                    s.setPrice(new BigDecimal("300.00"));
+                }
+            }
+            serviceRepository.saveAll(existing);
+            System.out.println("✂️ Grooming service rates updated (Haircut: 120, Shaving: 80, Combo: 200, Facial: 300)");
         }
     }
 
     private void seedChairs() {
-        if (chairRepository.count() == 0) {
-            List<Chair> chairs = new ArrayList<>();
-            Chair chair1 = new Chair();
-            chair1.setChairNumber(1);
-            chair1.setName("Main Service Chair 1");
-            chair1.setStatus("available");
-            chair1.setActive(true);
-            chairs.add(chair1);
-
-            Chair chair2 = new Chair();
-            chair2.setChairNumber(2);
-            chair2.setName("Main Service Chair 2");
-            chair2.setStatus("available");
-            chair2.setActive(true);
-            chairs.add(chair2);
-
-            chairRepository.saveAll(chairs);
-            System.out.println("💺 2 Main Service Chairs seeded successfully");
-        } else {
-            // Ensure only 2 main service chairs are active and properly labeled
-            List<Chair> allChairs = chairRepository.findAll();
-            for (Chair c : allChairs) {
-                if (c.getChairNumber() == 1) {
-                    c.setName("Main Service Chair 1");
-                    c.setActive(true);
-                } else if (c.getChairNumber() == 2) {
-                    c.setName("Main Service Chair 2");
-                    c.setActive(true);
-                } else {
-                    c.setActive(false);
-                }
+        for (int i = 1; i <= 6; i++) {
+            final int num = i;
+            Chair chair = chairRepository.findByChairNumber(num).orElse(null);
+            if (chair == null) {
+                chair = new Chair();
+                chair.setChairNumber(num);
+                chair.setStatus("available");
             }
-            chairRepository.saveAll(allChairs);
-            System.out.println("💺 Configured exactly 2 Main Service Chairs (Chairs 1 & 2 active)");
+            if (num <= 2) {
+                chair.setName("Seat " + num);
+                chair.setChairType("main");
+            } else {
+                chair.setName("Waiting Chair " + (num - 2));
+                chair.setChairType("waiting");
+            }
+            chair.setActive(true);
+            chairRepository.save(chair);
         }
+
+        List<Chair> allChairs = chairRepository.findAll();
+        for (Chair c : allChairs) {
+            if (c.getChairNumber() > 6) {
+                c.setActive(false);
+                chairRepository.save(c);
+            }
+        }
+        System.out.println("💺 Configured 2 Main Service Chairs & 4 Waiting Chairs successfully");
     }
 
     private Service createService(String name, String desc, int duration, BigDecimal price, String cat) {

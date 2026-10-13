@@ -68,13 +68,14 @@ function updateAdminClock() {
 // 1. LEFT COLUMN: 2 SERVICE SEATS (Matches Customer Layout)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function fetchAdminSeats() {
+async function fetchAdminSeats(date) {
+  const targetDate = date || selectedAdminDate;
   const token = localStorage.getItem('barber_token');
   const container = document.getElementById('admin-seats-container');
   if (!container) return;
 
   try {
-    const res = await fetch('/api/chairs', {
+    const res = await fetch(`/api/chairs?date=${targetDate}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
@@ -102,13 +103,29 @@ function renderAdminSeats(chairs) {
   const container = document.getElementById('admin-seats-container');
   if (!container) return;
 
-  // Filter or ensure exactly 2 seats (Seat 1 and Seat 2)
   let seat1 = chairs.find(c => c.chair_number === 1) || { chair_number: 1, name: 'Seat 1', status: 'available', customer_name: '---', time: '---' };
   let seat2 = chairs.find(c => c.chair_number === 2) || { chair_number: 2, name: 'Seat 2', status: 'available', customer_name: '---', time: '---' };
 
+  const waitChairs = [3, 4, 5, 6].map((num, i) => {
+    return chairs.find(c => c.chair_number === num) || {
+      chair_number: num,
+      name: `Waiting Chair ${i + 1}`,
+      chair_type: 'waiting',
+      status: 'available',
+      customer_name: '---',
+      time: '---',
+      token_number: '---'
+    };
+  });
+
   const seats = [seat1, seat2];
 
-  let html = '';
+  let html = `
+    <div class="mb-2">
+      <span class="fw-bold small text-secondary text-uppercase"><i class="fa-solid fa-scissors me-1 text-primary"></i> Main Service Seats (2)</span>
+    </div>
+  `;
+
   seats.forEach(seat => {
     const isOccupied = seat.status === 'occupied' || (seat.customer_name && seat.customer_name !== '---');
     const statusClass = isOccupied ? 'occupied' : 'available';
@@ -138,7 +155,7 @@ function renderAdminSeats(chairs) {
       <div class="seat-card-compact ${statusClass}">
         <div class="seat-title-row">
           <div class="seat-name">
-            Seat ${seat.chair_number}
+            <i class="fa-solid fa-scissors me-1 text-primary"></i> Seat ${seat.chair_number}
           </div>
           <span class="seat-status-badge ${statusClass}">${statusBadge}</span>
         </div>
@@ -165,6 +182,41 @@ function renderAdminSeats(chairs) {
     `;
   });
 
+  html += `
+    <div class="mt-3 mb-2 d-flex justify-content-between align-items-center">
+      <span class="fw-bold small text-secondary text-uppercase"><i class="fa-solid fa-chair me-1 text-warning"></i> Waiting Chairs (4)</span>
+      <span class="badge bg-light text-muted border" style="font-size:0.65rem;">Auto-Promotes to Main Seat</span>
+    </div>
+    <div class="waiting-chairs-grid">
+  `;
+
+  waitChairs.forEach((wc, i) => {
+    const custName = wc.customer_name && wc.customer_name !== '---'
+      ? wc.customer_name
+      : (wc.reserved_by_customer ? wc.reserved_by_customer.name : '---');
+    const isOccupied = wc.status === 'occupied' || wc.status === 'waiting' || (custName !== '---');
+    const tok = wc.token_number && wc.token_number !== '---' ? wc.token_number : '';
+
+    html += `
+      <div class="waiting-chair-card ${isOccupied ? 'waiting' : 'available'}">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="fw-bold text-dark" style="font-size:0.82rem;">
+            <i class="fa-solid fa-chair me-1 text-warning"></i> W${i + 1}
+          </span>
+          <span class="badge ${isOccupied ? 'bg-warning text-dark' : 'bg-success text-white'}" style="font-size:0.62rem;">
+            ${isOccupied ? 'SEATED' : 'FREE'}
+          </span>
+        </div>
+        <div class="small text-truncate ${isOccupied ? 'fw-bold text-dark' : 'text-muted'}" style="font-size:0.76rem;">
+          ${isOccupied ? custName : 'Ready'}
+        </div>
+        ${isOccupied && wc.time && wc.time !== '---' ? `<div class="text-secondary" style="font-size:0.68rem;"><i class="fa-regular fa-clock me-1"></i>${wc.time}</div>` : ''}
+        ${tok ? `<div class="text-primary fw-bold" style="font-size:0.68rem;">Token: ${tok}</div>` : `<div class="text-muted" style="font-size:0.68rem;">Free Seat</div>`}
+      </div>
+    `;
+  });
+
+  html += `</div>`;
   container.innerHTML = html;
 }
 
@@ -202,7 +254,8 @@ async function executeFinishService() {
   const token = localStorage.getItem('barber_token');
 
   try {
-    const res = await fetch(`/api/chairs/${pendingFinishChairId}/complete-service`, {
+    const url = `/api/chairs/${pendingFinishChairId}/complete-service` + (selectedAdminDate ? `?date=${encodeURIComponent(selectedAdminDate)}` : '');
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -261,6 +314,7 @@ function selectAdminDateFilter(period) {
   const dateInput = document.getElementById('admin-slot-picker-date');
   if (dateInput) dateInput.value = selectedAdminDate;
 
+  fetchAdminSeats(selectedAdminDate);
   fetchAdminSlots();
 }
 
@@ -268,6 +322,7 @@ function onAdminDateChanged(val) {
   if (!val) return;
   selectedAdminDate = val;
   document.querySelectorAll('.slot-date-btn').forEach(b => b.classList.remove('active'));
+  fetchAdminSeats(selectedAdminDate);
   fetchAdminSlots();
 }
 
@@ -277,7 +332,7 @@ async function fetchAdminSlots() {
   if (!container) return;
 
   try {
-    const res = await fetch(`/api/appointments/slots/detailed?date=${selectedAdminDate}`, {
+    const res = await fetch(`/api/appointments/slots/detailed?date=${encodeURIComponent(selectedAdminDate)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
 
@@ -286,15 +341,27 @@ async function fetchAdminSlots() {
       return;
     }
 
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.message || 'Failed to fetch slots');
+    let json = null;
+    try {
+      json = await res.json();
+    } catch (parseErr) {
+      // Non-JSON response (e.g., 500 HTML or connection error)
+    }
+
+    if (!res.ok || !json) {
+      throw new Error((json && json.message) || `Server returned error (${res.status})`);
+    }
 
     renderAdminSlots(json.data || []);
   } catch (err) {
     console.error('Error fetching admin slots:', err);
     container.innerHTML = `
-      <div class="alert alert-danger p-2 small">
-        Failed to load time slots.
+      <div class="alert alert-danger p-3 small shadow-sm">
+        <div class="fw-bold mb-1"><i class="fa-solid fa-triangle-exclamation me-1"></i> Failed to load time slots.</div>
+        <div class="text-muted mb-2" style="font-size:0.78rem;">${err.message || 'Database connection error'}. Make sure MySQL service (MySQL80) is running.</div>
+        <button type="button" class="btn btn-sm btn-outline-danger px-3" onclick="fetchAdminSlots()" style="font-size:0.75rem;">
+          <i class="fa-solid fa-rotate-right me-1"></i> Retry
+        </button>
       </div>
     `;
   }
@@ -450,10 +517,28 @@ function renderAdminQueue(list) {
 // 5. REAL-TIME SYNCHRONIZATION & WEBSOCKET
 // ─────────────────────────────────────────────────────────────────────────────
 
+let adminDebounceTimer = null;
+function scheduleAdminRefresh(delay = 300) {
+  if (adminDebounceTimer) clearTimeout(adminDebounceTimer);
+  adminDebounceTimer = setTimeout(refreshAllAdminPanels, delay);
+}
+
 function refreshAllAdminPanels() {
   fetchAdminSeats();
   fetchAdminSlots();
   fetchAdminQueue();
+}
+
+function startAdminPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(refreshAllAdminPanels, 10000);
+}
+
+function stopAdminPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
 }
 
 function setupAdminSockets() {
@@ -463,13 +548,14 @@ function setupAdminSockets() {
 
     adminSocket.onopen = () => {
       console.log('Admin WebSocket connected.');
+      stopAdminPolling();
     };
 
     adminSocket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (['chair-update', 'queue-update', 'slot-update', 'appointment-update'].includes(data.event)) {
-          refreshAllAdminPanels();
+          scheduleAdminRefresh(300);
         }
       } catch (e) {
         console.error('Error parsing socket message:', e);
@@ -481,11 +567,13 @@ function setupAdminSockets() {
     };
 
     adminSocket.onclose = () => {
-      setTimeout(setupAdminSockets, 3000);
+      startAdminPolling();
+      setTimeout(setupAdminSockets, 5000);
     };
 
   } catch (err) {
     console.warn('Failed to initialize WebSocket:', err);
+    startAdminPolling();
   }
 }
 
@@ -513,6 +601,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Connect WebSocket
   setupAdminSockets();
 
-  // Fallback Polling every 10 seconds to guarantee synchronization
-  pollTimer = setInterval(refreshAllAdminPanels, 10000);
+  // 30s background sync
+  setInterval(refreshAllAdminPanels, 30000);
 });

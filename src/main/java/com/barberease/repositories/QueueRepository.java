@@ -25,8 +25,11 @@ public interface QueueRepository extends JpaRepository<Queue, Long> {
     List<Queue> findByStatusOrderByCreatedAtAsc(String status);
     List<Queue> findByChairIdAndStatusOrderByCreatedAtAsc(Long chairId, String status);
     List<Queue> findByStatusAndCreatedAtAfterOrderByCreatedAtAsc(String status, LocalDateTime cutoff);
+    List<Queue> findByStatusInAndCreatedAtAfterOrderByCreatedAtAsc(Collection<String> statuses, LocalDateTime cutoff);
     List<Queue> findByChairIdAndStatusAndCreatedAtAfterOrderByCreatedAtAsc(Long chairId, String status, LocalDateTime cutoff);
     
+    List<Queue> findByStatusAndChairIsNullAndCreatedAtAfterOrderByCreatedAtAsc(String status, LocalDateTime cutoff);
+    long countByStatusAndChairIsNull(String status);
     long countByStatus(String status);
     long countByChairIdAndStatus(Long chairId, String status);
     long countByStatusAndCompletedAtAfter(String status, LocalDateTime cutoff);
